@@ -62,12 +62,21 @@ void showImage(string image)
 
 bool SampleOnnxFingerprint::processInput(const samplesCommon::BufferManager& buffers)
 {
+	const int inputC = mInputDims.d[1];
 	const int inputH = mInputDims.d[2];
 	const int inputW = mInputDims.d[3];
-	vector<uint8_t> fileData(inputH * inputW);
-
+	uchar* fileDataChar = (uchar*)malloc(mParams.batchSize * inputC * inputH * inputW * sizeof(uchar));
+	cv::Mat im = cv::imread("14.BMP", cv::COLOR_BGR2GRAY);
+	cv::resize(im, im, cv::Size(inputH, inputW));
 	//showImage("test.jpg");
-	
+	unsigned vol = inputH * inputW;
+	fileDataChar = im.data;
+	float* fileData = (float*)malloc(mParams.batchSize * inputC * inputH * inputW * sizeof(float));
+	for (int i = 0; i < vol; i++)
+	{
+		fileData[i] = (float)fileDataChar[i];
+	}
+
 
 	return true;
 }
@@ -100,7 +109,7 @@ bool SampleOnnxFingerprint::constructNetwork(SampleUniquePtr<nvinfer1::IBuilder>
 		return false;
 	}
 	builder->setMaxBatchSize(mParams.batchSize);
-	builder->setMaxWorkspaceSize(5_GiB);
+	builder->setMaxWorkspaceSize(1_GiB);
 	if (mParams.fp16)
 	{
 		config->setFlag(BuilderFlag::kFP16);
@@ -146,7 +155,7 @@ bool SampleOnnxFingerprint::build()
 	cout << "网络构建成功！" << endl;
 
 	mEngine = shared_ptr<nvinfer1::ICudaEngine>(
-		builder->buildEngineWithConfig(*network, *config), samplesCommon::InferDeleter());
+		builder->buildCudaEngine(*network), samplesCommon::InferDeleter());
 	if (!mEngine)
 	{
 		return false;
@@ -159,6 +168,8 @@ bool SampleOnnxFingerprint::build()
 	assert(network->getNbOutputs == 1);
 	mOutputDims = network->getOutput(0)->getDimensions();
 	assert(mOutputDims.nbDims == 2);
+
+	cout << "build completed!" << endl;
 
 	return true;
 }
