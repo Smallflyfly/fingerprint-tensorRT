@@ -47,7 +47,7 @@ private:
 		SampleUniquePtr<nvinfer1::INetworkDefinition>& network, SampleUniquePtr<nvinfer1::IBuilderConfig>& config,
 		SampleUniquePtr<nvonnxparser::IParser>& parser);
 
-	bool processInput(const samplesCommon::BufferManager& buffers, string image);
+	bool processInput(samplesCommon::BufferManager& buffers, string image);
 
 	float* verfiyOutput(const samplesCommon::BufferManager& buffers);
 
@@ -63,7 +63,7 @@ void showImage(string image)
 	cv::destroyAllWindows();
 }
 
-bool SampleOnnxFingerprint::processInput(const samplesCommon::BufferManager& buffers, string image)
+bool SampleOnnxFingerprint::processInput(samplesCommon::BufferManager& buffers, string image)
 {
 	const int inputC = mInputDims.d[1];
 	const int inputH = mInputDims.d[2];
@@ -108,10 +108,7 @@ float* SampleOnnxFingerprint::infer(samplesCommon::BufferManager& buffers, share
 {
 	auto context = SampleUniquePtr<nvinfer1::IExecutionContext>(engine->createExecutionContext());
 	assert(mParams.inputTensorNames.size() == 1);
-	if (!processInput(buffers, image))
-	{
-		return false;
-	}
+	processInput(buffers, image);
 
 	//Memcpy from host input buffers to device input buffers
 	buffers.copyInputToDevice();
@@ -253,7 +250,6 @@ float getFingerprintSimlarity(float* out1, float* out2)
 
 int main(int argc, char** argv) {
 	samplesCommon::Args args;
-	cout << **argv << endl;
 	bool argsOK = samplesCommon::parseArgs(args, argc, argv);
 	if (!argsOK)
 	{
@@ -269,17 +265,18 @@ int main(int argc, char** argv) {
 	gLogInfo << "Building and running a GPU inference engine for Onnx fingerprint" << endl;
 
 	int batch_size = 1;
+	string image_root = "data/input/FingerprintIdentification/image/";
 
 	shared_ptr<nvinfer1::ICudaEngine> mEngine;
 	mEngine = fingerprintSample.build();
 	cout << "engine 构建成功" << endl;
-	string image1 = "14.BMP";
+	string image1 = image_root + "1532.BMP";
 	clock_t start, end;
 	start = clock();
 	samplesCommon::BufferManager buffers1(mEngine, batch_size);
 	float* out1 = fingerprintSample.infer(buffers1, mEngine, image1);
 
-	string image2 = "2280.BMP";
+	string image2 = image_root + "1986.BMP";
 	samplesCommon::BufferManager buffers2(mEngine, batch_size);
 	float* out2 = fingerprintSample.infer(buffers2, mEngine, image2);
 	float simlarity = getFingerprintSimlarity(out1, out2);
