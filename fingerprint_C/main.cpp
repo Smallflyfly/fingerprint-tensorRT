@@ -11,10 +11,13 @@
 #include <fstream>
 #include <iostream>
 #include <sstream>
+#include <time.h>
 
 #include <opencv2/opencv.hpp>
 
 using namespace std;
+
+const static int OUTPUT_SIZE = 512;
 
 
 class SampleOnnxFingerprint
@@ -24,18 +27,18 @@ class SampleOnnxFingerprint
 
 public:
 	SampleOnnxFingerprint(const samplesCommon::OnnxSampleParams& params) 
-		: mParams(params), mEngine(nullptr)
+		: mParams(params)
 	{
 	}
 
-	bool build();
+	shared_ptr<nvinfer1::ICudaEngine> build();
 
-	bool infer();
+	float* infer(samplesCommon::BufferManager& buffer, shared_ptr<nvinfer1::ICudaEngine> engine, string image);
 
 private:
 	samplesCommon::OnnxSampleParams mParams;
 
-	shared_ptr<nvinfer1::ICudaEngine> mEngine;
+	
 
 	nvinfer1::Dims mInputDims;
 	nvinfer1::Dims mOutputDims;
@@ -44,9 +47,9 @@ private:
 		SampleUniquePtr<nvinfer1::INetworkDefinition>& network, SampleUniquePtr<nvinfer1::IBuilderConfig>& config,
 		SampleUniquePtr<nvonnxparser::IParser>& parser);
 
-	bool processInput(const samplesCommon::BufferManager& buffers);
+	bool processInput(const samplesCommon::BufferManager& buffers, string image);
 
-	bool verfiyOutput(const samplesCommon::BufferManager& buffers);
+	float* verfiyOutput(const samplesCommon::BufferManager& buffers);
 
 
 
@@ -60,43 +63,69 @@ void showImage(string image)
 	cv::destroyAllWindows();
 }
 
-bool SampleOnnxFingerprint::processInput(const samplesCommon::BufferManager& buffers)
+bool SampleOnnxFingerprint::processInput(const samplesCommon::BufferManager& buffers, string image)
 {
 	const int inputC = mInputDims.d[1];
 	const int inputH = mInputDims.d[2];
 	const int inputW = mInputDims.d[3];
+	const float imageMean = 0.568;
+	const float imageStd = 0.389;
 	uchar* fileDataChar = (uchar*)malloc(mParams.batchSize * inputC * inputH * inputW * sizeof(uchar));
-	cv::Mat im = cv::imread("14.BMP", cv::COLOR_BGR2GRAY);
+	cv::Mat im = cv::imread(image, cv::COLOR_BGR2GRAY);
 	cv::resize(im, im, cv::Size(inputH, inputW));
 	//showImage("test.jpg");
 	unsigned vol = inputH * inputW;
 	fileDataChar = im.data;
-	float* fileData = (float*)malloc(mParams.batchSize * inputC * inputH * inputW * sizeof(float));
+	//float* fileData = (float*)malloc(mParams.batchSize * inputC * inputH * inputW * sizeof(float));
+	float* hostDataBuffer = static_cast<float*>(buffers.getHostBuffer(mParams.inputTensorNames[0]));
+	// convert to 0-1
 	for (int i = 0; i < vol; i++)
 	{
-		fileData[i] = (float)fileDataChar[i];
+		hostDataBuffer[i] = (float)fileDataChar[i] / 255.0;
 	}
-
-
+	// normalize
+	// (0.568, 0.389)
+	for (int i = 0; i < vol; i++)
+	{
+		hostDataBuffer[i] = (hostDataBuffer[i] - imageMean) / imageStd;
+	}
 	return true;
 }
 
-bool SampleOnnxFingerprint::infer()
+float* SampleOnnxFingerprint::verfiyOutput(const samplesCommon::BufferManager& buffers)
 {
-	samplesCommon::BufferManager buffers(mEngine, mParams.batchSize);
+	const int outputSize = mOutputDims.d[1];
+	float* output = static_cast<float*>(buffers.getHostBuffer(mParams.outputTensorNames[0]));
+	/*for (int i = 0; i < 20; i++)
+	{
+		cout << output[i] << endl;
+	}*/
+	
+	return output;
+}
 
-	auto context = SampleUniquePtr<nvinfer1::IExecutionContext>(mEngine->createExecutionContext());
-	if (!context)
-	{
-		return false;
-	}
+float* SampleOnnxFingerprint::infer(samplesCommon::BufferManager& buffers, shared_ptr<nvinfer1::ICudaEngine> engine, string image)
+{
+	auto context = SampleUniquePtr<nvinfer1::IExecutionContext>(engine->createExecutionContext());
 	assert(mParams.inputTensorNames.size() == 1);
-	cout << "hello1" << endl;
-	if (!processInput(buffers))
+	if (!processInput(buffers, image))
 	{
 		return false;
 	}
-	return true;
+
+	//Memcpy from host input buffers to device input buffers
+	buffers.copyInputToDevice();
+
+	bool status = context->executeV2(buffers.getDeviceBindings().data());
+	if (!status)
+	{
+		return false;
+	}
+
+	// Memcpy from device output buffers to host output buffers
+	buffers.copyOutputToHost();
+	float* out = verfiyOutput(buffers);
+	return out;
 }
 
 bool SampleOnnxFingerprint::constructNetwork(SampleUniquePtr<nvinfer1::IBuilder>& builder,
@@ -124,7 +153,7 @@ bool SampleOnnxFingerprint::constructNetwork(SampleUniquePtr<nvinfer1::IBuilder>
 	return true;
 }
 
-bool SampleOnnxFingerprint::build()
+shared_ptr<nvinfer1::ICudaEngine> SampleOnnxFingerprint::build()
 {
 	auto builder = SampleUniquePtr<nvinfer1::IBuilder>(nvinfer1::createInferBuilder(gLogger.getTRTLogger()));
 	if (!builder)
@@ -154,12 +183,9 @@ bool SampleOnnxFingerprint::build()
 
 	cout << "网络构建成功！" << endl;
 
-	mEngine = shared_ptr<nvinfer1::ICudaEngine>(
+	shared_ptr<nvinfer1::ICudaEngine> mEngine = shared_ptr<nvinfer1::ICudaEngine>(
 		builder->buildCudaEngine(*network), samplesCommon::InferDeleter());
-	if (!mEngine)
-	{
-		return false;
-	}
+	
 
 	assert(network->getNbInputs(0) == 1);
 	mInputDims = network->getInput(0)->getDimensions();
@@ -171,7 +197,7 @@ bool SampleOnnxFingerprint::build()
 
 	cout << "build completed!" << endl;
 
-	return true;
+	return mEngine;
 }
 
 
@@ -205,6 +231,26 @@ void printHelpInfo()
 	std::cout << "--imageFile     image path like ./test.jpg" << std::endl;
 }
 
+float getMod(float* out)
+{
+	float sum = 0.0;
+	for (int i = 0; i < OUTPUT_SIZE; i++)
+	{
+		sum += out[i] * out[i];
+	}
+	return sqrt(sum);
+}
+
+float getFingerprintSimlarity(float* out1, float* out2)
+{
+	float multi = 0.0;
+	for (int i = 0; i < OUTPUT_SIZE; i++)
+	{
+		multi += out1[i] * out2[i];
+	}
+	return multi / (getMod(out1) * getMod(out2));
+}
+
 int main(int argc, char** argv) {
 	samplesCommon::Args args;
 	cout << **argv << endl;
@@ -222,16 +268,25 @@ int main(int argc, char** argv) {
 
 	gLogInfo << "Building and running a GPU inference engine for Onnx fingerprint" << endl;
 
-	if (!fingerprintSample.build())
-	{
-		return gLogger.reportFail(sampleTest);
-	}
-	if (!fingerprintSample.infer())
-	{
-		return gLogger.reportFail(sampleTest);
-	}
+	int batch_size = 1;
+
+	shared_ptr<nvinfer1::ICudaEngine> mEngine;
+	mEngine = fingerprintSample.build();
+	cout << "engine 构建成功" << endl;
+	string image1 = "14.BMP";
+	clock_t start, end;
+	start = clock();
+	samplesCommon::BufferManager buffers1(mEngine, batch_size);
+	float* out1 = fingerprintSample.infer(buffers1, mEngine, image1);
+
+	string image2 = "2280.BMP";
+	samplesCommon::BufferManager buffers2(mEngine, batch_size);
+	float* out2 = fingerprintSample.infer(buffers2, mEngine, image2);
+	float simlarity = getFingerprintSimlarity(out1, out2);
+	cout << "image1 image2 simlarity: " << simlarity << endl;
+	end = clock();
+
+	cout <<"cost time: " << end - start << endl;
 
 	return gLogger.reportPass(sampleTest);
-
-	cout << "hello\n";
 }
