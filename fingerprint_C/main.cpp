@@ -114,10 +114,10 @@ float* SampleOnnxFingerprint::infer(samplesCommon::BufferManager& buffers, share
 	buffers.copyInputToDevice();
 
 	bool status = context->executeV2(buffers.getDeviceBindings().data());
-	if (!status)
-	{
-		return false;
-	}
+//	if (!status)
+//	{
+//		return false;
+//	}
 
 	// Memcpy from device output buffers to host output buffers
 	buffers.copyOutputToHost();
@@ -129,7 +129,7 @@ bool SampleOnnxFingerprint::constructNetwork(SampleUniquePtr<nvinfer1::IBuilder>
 	SampleUniquePtr<nvinfer1::INetworkDefinition>& network, SampleUniquePtr<nvinfer1::IBuilderConfig>& config, SampleUniquePtr<nvonnxparser::IParser>& parser)
 {
 	auto parsed = parser->parseFromFile(
-		locateFile(mParams.onnxFileName, mParams.dataDirs).c_str(), static_cast<int>(gLogger.getReportableSeverity()));
+		locateFile(mParams.onnxFileName, mParams.dataDirs).c_str(), static_cast<int>(sample::gLogger.getReportableSeverity()));
 	if (!parsed)
 	{
 		return false;
@@ -152,43 +152,43 @@ bool SampleOnnxFingerprint::constructNetwork(SampleUniquePtr<nvinfer1::IBuilder>
 
 shared_ptr<nvinfer1::ICudaEngine> SampleOnnxFingerprint::build()
 {
-	auto builder = SampleUniquePtr<nvinfer1::IBuilder>(nvinfer1::createInferBuilder(gLogger.getTRTLogger()));
-	if (!builder)
-	{
-		return false;
-	}
+	auto builder = SampleUniquePtr<nvinfer1::IBuilder>(nvinfer1::createInferBuilder(sample::gLogger.getTRTLogger()));
+//	if (!builder)
+//	{
+//		return false;
+//	}
 	const auto explictBatch = 1U << static_cast<uint32_t>(NetworkDefinitionCreationFlag::kEXPLICIT_BATCH);
 	auto network = SampleUniquePtr<nvinfer1::INetworkDefinition>(builder->createNetworkV2(explictBatch));
-	if (!network)
-	{
-		return false;
-	}
+//	if (!network)
+//	{
+//		return false;
+//	}
 	auto config = SampleUniquePtr<nvinfer1::IBuilderConfig>(builder->createBuilderConfig());
 
-	if (!config)
-	{
-		return false;
-	}
+//	if (!config)
+//	{
+//		return false;
+//	}
 
-	auto parser = SampleUniquePtr<nvonnxparser::IParser>(nvonnxparser::createParser(*network, gLogger.getTRTLogger()));
-	if (!parser)
-	{
-		return false;
-	}
+	auto parser = SampleUniquePtr<nvonnxparser::IParser>(nvonnxparser::createParser(*network, sample::gLogger.getTRTLogger()));
+//	if (!parser)
+//	{
+//		return false;
+//	}
 
 	auto constructed = constructNetwork(builder, network, config, parser);
 
-	cout << "ÍøÂç¹¹½¨³É¹¦£¡" << endl;
+//	cout << "ï¿½ï¿½ï¿½ç¹¹ï¿½ï¿½ï¿½É¹ï¿½ï¿½ï¿½" << endl;
 
 	shared_ptr<nvinfer1::ICudaEngine> mEngine = shared_ptr<nvinfer1::ICudaEngine>(
-		builder->buildCudaEngine(*network), samplesCommon::InferDeleter());
+		builder->buildEngineWithConfig(*network, *config), samplesCommon::InferDeleter());
 	
 
-	assert(network->getNbInputs(0) == 1);
+	assert(network->getNbInputs() == 1);
 	mInputDims = network->getInput(0)->getDimensions();
 	assert(mInputDims.nbDims == 4);
 
-	assert(network->getNbOutputs == 1);
+	assert(network->getNbOutputs() == 1);
 	mOutputDims = network->getOutput(0)->getDimensions();
 	assert(mOutputDims.nbDims == 2);
 
@@ -201,7 +201,7 @@ shared_ptr<nvinfer1::ICudaEngine> SampleOnnxFingerprint::build()
 samplesCommon::OnnxSampleParams initFingerprintParams(const samplesCommon::Args& args)
 {
 	samplesCommon::OnnxSampleParams params;
-	params.dataDirs.push_back("./");
+	params.dataDirs.push_back("data/");
 	params.onnxFileName = "fingerprint.onnx";
 	params.inputTensorNames.push_back("input");
 	params.outputTensorNames.push_back("output");
@@ -253,31 +253,31 @@ int main(int argc, char** argv) {
 	bool argsOK = samplesCommon::parseArgs(args, argc, argv);
 	if (!argsOK)
 	{
-		cout << "²ÎÊý½âÎö´íÎó" << endl;
+		cout << "ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½" << endl;
 		return EXIT_FAILURE;
 	}
-	auto sampleTest = gLogger.defineTest("fingerprint", argc, argv);
+	auto sampleTest = sample::gLogger.defineTest("fingerprint", argc, argv);
 
-	gLogger.reportTestStart(sampleTest);
+	sample::gLogger.reportTestStart(sampleTest);
 
 	SampleOnnxFingerprint fingerprintSample(initFingerprintParams(args));
 
-	gLogInfo << "Building and running a GPU inference engine for Onnx fingerprint" << endl;
+	sample::gLogInfo << "Building and running a GPU inference engine for Onnx fingerprint" << endl;
 
 	int batch_size = 1;
-	string image_root = "data/input/FingerprintIdentification/image/";
+	string image_root = "data/";
 
 	shared_ptr<nvinfer1::ICudaEngine> mEngine;
 	mEngine = fingerprintSample.build();
-	cout << "engine ¹¹½¨³É¹¦" << endl;
-	string image1 = image_root + "1532.BMP";
+	cout << "engine ï¿½ï¿½ï¿½ï¿½ï¿½É¹ï¿½" << endl;
+	string image1 = image_root + "14.BMP";
 	clock_t start, end;
 	start = clock();
-	samplesCommon::BufferManager buffers1(mEngine, batch_size);
+	samplesCommon::BufferManager buffers1(mEngine);
 	float* out1 = fingerprintSample.infer(buffers1, mEngine, image1);
 
-	string image2 = image_root + "1986.BMP";
-	samplesCommon::BufferManager buffers2(mEngine, batch_size);
+	string image2 = image_root + "2280.BMP";
+	samplesCommon::BufferManager buffers2(mEngine);
 	float* out2 = fingerprintSample.infer(buffers2, mEngine, image2);
 	float simlarity = getFingerprintSimlarity(out1, out2);
 	cout << "image1 image2 simlarity: " << simlarity << endl;
@@ -285,5 +285,5 @@ int main(int argc, char** argv) {
 
 	cout <<"cost time: " << end - start << endl;
 
-	return gLogger.reportPass(sampleTest);
+	return sample::gLogger.reportPass(sampleTest);
 }
